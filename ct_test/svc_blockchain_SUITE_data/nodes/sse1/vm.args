@@ -1,0 +1,43 @@
+### Copyright (c) 2018 SPARKL Limited. All Rights Reserved.
+### Licensed under the Apache License, Version 2.0 (the "License");
+### you may not use this file except in compliance with the License.
+### You may obtain a copy of the License at
+###
+### http://www.apache.org/licenses/LICENSE-2.0
+###
+### Unless required by applicable law or agreed to in writing, software
+### distributed under the License is distributed on an "AS IS" BASIS,
+### WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+### See the License for the specific language governing permissions and
+### limitations under the License.
+### Author <jacoby@sparkl.com> Jacoby Thwaites
+###
+### This file provides the startup args for the Erlang node that runs
+### SPARKL. Please read this in conjunction with the sys.config file.
+###
+### Note that the '-s sse start' line in this file is responsible for
+### starting SPARKL, whose dependencies must be listed in the reltool.config
+### file.
+
+## Name of the node on this machine.
+-name ct_svc_blockchain1@127.0.0.1
+
+## Cookie for distributed erlang
+-setcookie ct
+
+## Heartbeat management; auto-restarts VM if it dies or becomes unresponsive
+## (Disabled by default..use with caution!)
+##-heart
+
+## Enable kernel poll and a few async threads
+##+K true
+##+A 5
+
+## Increase number of concurrent ports/sockets
+-env ERL_MAX_PORTS 4096
+
+## Tweak GC to run more often
+##-env ERL_FULLSWEEP_AFTER 10
+
+## This starts SPARKL.
+## -s sse start

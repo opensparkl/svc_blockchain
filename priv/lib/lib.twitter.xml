@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<!--
+copyright 2018 SPARKL Limited. All Rights Reserved.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+author <ahfarrell@sparkl.com> Andrew Farrell
+
+Mix autoconnects an external python service which pushes status updates to
+SPARKL SaaS twitter account.
+-->
+<folder name="lib.twitter">
+  <service name="Sequencer" provision="sequencer"/>
+  <service name="Twitter" provision="rest">
+    <prop name="instance.spec" onopen="Mix/StartPoster"/>
+  </service>
+  <service name="Starter" provision="expr"/>
+  <mix name="Mix">
+    <grant to="*" permission="rx"/>
+    <field name="url" type="utf8"/>
+    <field name="status" type="utf8"/>
+    <field name="reason" type="term"/>
+    <field name="event" type="json"/>
+    <field name="OK"/>
+    <field name="ERROR"/>
+    <solicit name="PostStatus" service="Sequencer" fields="status">
+      <response name="Ok" fields="url"/>
+      <response name="Error" fields="reason"/>
+    </solicit>
+    <solicit name="StartPoster" service="Sequencer" fields="event">
+      <response name="Ok" fields="OK"/>
+      <response name="Error" fields="ERROR"/>
+    </solicit>
+    <folder name="Impl">
+      <request name="PostStatus" service="Twitter" fields="status">
+        <reply name="Ok" fields="url"/>
+        <reply name="Error" fields="reason"/>
+      </request>
+      <request name="StartPoster" fields="event" service="Starter">
+        <reply name="Ok" fields="OK"/>
+        <reply name="Error" fields="ERROR"/>
+        <prop name="expr.src" content-type="text/x-erlang"><![CDATA[  
+  AppKey = "...",
+  AppSecret = "...",
+  OAuthKey = "...",
+  OAuthSecret = "...",
+  Token = "...",
+  Host = "http://localhost:8001",
+
+  [_Impl, _Mix | SvcPath_] =
+    lists:reverse(
+      string:tokens(
+        Meta(folder), "/")),
+  SvcPath =
+    lists:join(
+      "/",
+      lists:reverse(
+        ["Twitter" | SvcPath_])),
+
+  AppDir = code:priv_dir(
+    svc_blockchain),
+  PyPath = filename:join(
+    [AppDir, "scripts"]),
+  Envs = lists:flatten(
+    io_lib:format(
+      "TWITTER_APPKEY=~s TWITTER_APPSECRET=~s "
+      "TWITTER_OAUTHKEY=~s TWITTER_OAUTHSECRET=~s ",
+      [AppKey, AppSecret, OAuthKey, OAuthSecret])),
+
+  Config =
+    #{
+      envs => Envs,
+      host => Host,
+      user => Meta(user),
+      token => Token,
+      pypath => PyPath,
+      svcpath => SvcPath,
+      module => "twitter.post",
+      tokenname => "service"},
+  ok =
+    svc_blockchain:start_ext_svc(Config),
+  "Ok".
+]]></prop>
+      </request>
+    </folder>
+  </mix>
+</folder>

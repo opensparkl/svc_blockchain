@@ -1,0 +1,3 @@
+[MESSAGES CONTROL]
+# In the interests of being pragmatic.  Start with reporting enabled, but disable for committed config.
+disable=too-many-arguments,too-many-instance-attributes,too-many-locals,broad-except,duplicate-code
