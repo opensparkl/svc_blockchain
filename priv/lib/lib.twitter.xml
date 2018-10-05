@@ -52,8 +52,6 @@ SPARKL SaaS twitter account.
   AppSecret = "...",
   OAuthKey = "...",
   OAuthSecret = "...",
-  Token = "...",
-  Host = "http://localhost:8001",
 
   [_Impl, _Mix | SvcPath_] =
     lists:reverse(
@@ -78,13 +76,10 @@ SPARKL SaaS twitter account.
   Config =
     #{
       envs => Envs,
-      host => Host,
       user => Meta(user),
-      token => Token,
       pypath => PyPath,
       svcpath => SvcPath,
-      module => "twitter.post",
-      tokenname => "service"},
+      module => "twitter.post"},
   ok =
     svc_blockchain:start_ext_svc(Config),
   "Ok".

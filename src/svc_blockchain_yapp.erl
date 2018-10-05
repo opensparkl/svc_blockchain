@@ -73,8 +73,7 @@ handle_request(Arg, 'POST',
         {hash, Hash}]),
 
       {Signed, PubKey} =
-        gen_server:call(
-          svc_blockchain_merkle, {hash, Hash}),
+        svc_blockchain_merkle:push_hash(Hash),
 
       {ok, {?mt_param_merkle, [],
         [{?mt_param_signed, [], [{?PRIMITIVE, ?string, ?s(Signed)}]},
@@ -108,8 +107,7 @@ handle_request(Arg, 'GET',
       ?DEBUG([
         {signed, Signed__}]),
 
-      case gen_server:call(
-          svc_blockchain_merkle, {proof, Signed__}) of
+      case svc_blockchain_merkle:get_proof(Signed__) of
 
         {ok, {Signed, Proof, PubKey, Epoch}} ->
           {ok, {?mt_param_merkle, [],

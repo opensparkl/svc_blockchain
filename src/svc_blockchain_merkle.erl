@@ -31,6 +31,8 @@
 %% Exports
 %% ------------------------------------------------------------------
 -export([
+  push_hash/1,
+  get_proof/1,
   start/2,
   start_link/2]).
 
@@ -103,6 +105,20 @@ start_link(ChainDir, BlockKeys) ->
 start_link(ChainDir, BlockKeys) ->
   gen_server:start_link(
     {local, ?SERVER}, ?MODULE, {ChainDir, BlockKeys}, []).
+
+
+%% @doc
+%% Push hash to merkle tree record
+push_hash(Hash) ->
+  gen_server:call(
+    svc_blockchain_merkle, {hash, Hash}).
+
+%% @doc
+%% Get proof of hash record
+get_proof(Signed) ->
+  gen_server:call(
+    svc_blockchain_merkle, {proof, Signed}).
+
 
 %% ------------------------------------------------------------------
 %% gen_server implementation

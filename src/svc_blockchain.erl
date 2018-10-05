@@ -36,7 +36,8 @@
   get_blockfuns/0,
   create_table/2,
   start_ext_svc/1,
-  start_ext_svc/2
+  start_ext_svc/2,
+  retract_token/2
 ]).
 
 -behaviour(sse).
@@ -187,20 +188,63 @@ start_ext_svc(Config) ->
 start_ext_svc(Config, Sleep) ->
   #{
     envs := Envs,
-    host := Host,
-    user := User,
-    token := Token,
+    user := Username,
     pypath := PyPath,
     svcpath := SvcPath,
-    module := Module,
-    tokenname := TokenName} = Config,
+    module := Module} = Config,
+
+  {ok, User} =
+    sse_cfg:get_user(Username),
+
+  Unique =
+    ?s(erlang:unique_integer(
+      [positive, monotonic])),
+  Node =
+    ?s(node()),
+
+  TokenName =
+    lists:flatten(
+      io_lib:format(
+        "tmp.~s.~s",
+        [Node, Unique])),
+
+  % Generate a time-limited access token.
+  {Secret, #?PROP{
+      name = PropName} = Prop} =
+    sse_cfg_pwd:token_prop(
+      TokenName),
+  ok =
+    sse_cfg:store_props(
+      User, [Prop]),
+  ?DEBUG(
+    [{added_token, PropName}]),
+
+  {ok, _TRef} =
+    timer:apply_after(
+      ?default_svc_token_timeout,
+      svc_blockchain,
+      retract_token,
+      [PropName, User]),
+
+  {ok, Hostname} =
+    sse_inet_util:get_sse_address_composed(),
+  {ok, {HttpPort, _HttpsPort}} =
+    sse_inet_util:get_sse_port(),
+
+  HttpUrl =
+    lists:flatten(
+      io_lib:format(
+        "http://~s:~s",
+        [Hostname, ?s(HttpPort)])),
+  ?DEBUG(
+    [{http_url, HttpUrl}]),
 
   Command = lists:flatten(
     io_lib:format(
-      "~s bash -c 'sparkl connect ~s && "
+      "~s bash -c '(sparkl close || true) &&  sparkl connect ~s && "
       "sparkl login -t ~s ~s ~s && "
       "sparkl service --path ~s ~s ~s > /tmp/out 2>&1' &",
-      [Envs, Host, TokenName, User, Token, PyPath, SvcPath, Module])),
+      [Envs, HttpUrl, TokenName, Username, Secret, PyPath, SvcPath, Module])),
   ?DEBUG(
     [{start_ext_svc, Command}]),
   Result =
@@ -479,3 +523,22 @@ get_table_(Action, Table) ->
           make_ref(), [{type, set}, {file, Table}, {repair, true}]),
       TableRef
   end.
+
+
+%% @doc
+%% Retracts temp access token with propname, PropName
+%%
+-spec
+retract_token(PropName, User) ->
+  ok
+when
+  PropName :: string(),
+  User     :: user().
+
+retract_token(PropName, User) ->
+  ok =
+    sse_cfg:remove_props(
+      User, [PropName]),
+  ?DEBUG(
+    [{retracted_token, PropName}]),
+  ok.

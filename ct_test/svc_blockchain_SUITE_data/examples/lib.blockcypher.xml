@@ -58,8 +58,6 @@ the value can be inspected on the testnet.
         <reply name="Error" fields="ERROR"/>
         <prop name="expr.src" content-type="text/x-erlang"><![CDATA[
   BCToken = "bc65c0047fcc4126bfe08ff1dcc2d3c5",
-  Token = "0tErruFNaREI-QxG2GiEQ8eUaBQ",
-  Host = "http://localhost:8001",
 
   [_Impl, _Mix | SvcPath_] =
     lists:reverse(
@@ -83,13 +81,10 @@ the value can be inspected on the testnet.
   Config =
     #{
       envs => Envs,
-      host => Host,
       user => Meta(user),
-      token => Token,
       pypath => PyPath,
       svcpath => SvcPath,
-      module => "blockcypher.post",
-      tokenname => "service"},
+      module => "blockcypher.post"},
   ok =
     svc_blockchain:start_ext_svc(Config, 5000),
   "Ok".

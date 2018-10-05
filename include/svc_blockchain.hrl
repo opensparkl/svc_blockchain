@@ -69,6 +69,7 @@
 -define(local_bc_dir, "blockchain").
 -define(local_ev_dir, "events").
 
+-define(default_svc_token_timeout, 300000).
 -define(default_merkletree_interval, 300000).
 -define(default_merkletree_quorum, 1).
 -define(default_genserver_timeout, 15000).
