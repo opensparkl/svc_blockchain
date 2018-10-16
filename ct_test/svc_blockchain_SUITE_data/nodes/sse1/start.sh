@@ -16,7 +16,7 @@
 # Usage:
 #   ./start.sh [console]
 #
-ROOT=`git rev-parse --show-toplevel`
+ROOT=`git rev-parse --show-toplevel`/../..
 echo $ROOT
 export ERL_LIBS=$ROOT/apps:$ROOT/opts:$ROOT/deps
 

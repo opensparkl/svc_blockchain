@@ -34,6 +34,7 @@
 -export([
   start_link/0,
   get_blockfuns/0,
+  create_table/1,
   create_table/2,
   start_ext_svc/1,
   start_ext_svc/2,
@@ -100,10 +101,14 @@ info() ->
 %% block processing is done locally or remotely.
 %%
 get_blockfuns() ->
-  case
+  BlockProcNode =
     application:get_env(
-      svc_blockchain, block_procnode, undefined) of
+      svc_blockchain, block_procnode, undefined),
 
+  ?DEBUG([
+    {blockprocnode, BlockProcNode}]),
+
+  case BlockProcNode of
     undefined ->
       Cast =
         fun(Module, Message) ->
@@ -170,6 +175,21 @@ create_table(Prefix, ChainDir) ->
   TableRef = get_table(DetsTable),
 
   {ok, {TableRef, GetTableFun, Node}}.
+
+
+%% @doc
+%% As create_table/2.  Gets chain directory first.
+%%
+-spec create_table(Prefix) ->
+  {ok, {TableRef, GetTableFun, Node}}
+when
+  Prefix      :: string(),
+  TableRef    :: reference(),
+  GetTableFun :: fun((reference()) -> reference()),
+  Node        :: string().
+
+create_table(Prefix) ->
+  create_table(Prefix, get_chain_dir()).
 
 
 %% @doc
@@ -277,18 +297,9 @@ init_(_Args) ->
 
   if
     BlockProc == undefined ->
-
-      % We are a local processor.
-      {ok, HomeDir} =
-        init:get_argument(home),
-
       % Base directory for local blockchain/events.
       ChainDir =
-        application:get_env(
-          svc_blockchain,
-          chain_dir,
-          filename:join(
-            HomeDir, ?default_blockchain_dir)),
+        get_chain_dir(),
 
       BlockReceiveKeys =
         application:get_env(
@@ -406,6 +417,9 @@ handle_cast(
       svc_blockchain,
       merkletree_interval,
       ?default_merkletree_interval),
+
+  ?DEBUG([
+    {merkle_timeout, MerkleTimeout}]),
 
   if
     MerkleTimeout == -1 ->
@@ -542,3 +556,18 @@ retract_token(PropName, User) ->
   ?DEBUG(
     [{retracted_token, PropName}]),
   ok.
+
+
+%% @doc
+%% Gets ChainDir
+%%
+get_chain_dir() ->
+  {ok, HomeDir} =
+    init:get_argument(home),
+
+  % Base directory for local blockchain/events.
+  application:get_env(
+    svc_blockchain,
+    chain_dir,
+    filename:join(
+      HomeDir, ?default_blockchain_dir)).

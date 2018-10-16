@@ -54,9 +54,15 @@ when
 handle_request(Arg, 'POST',
     "/hash" ++ Hash_, #?USER{}) ->
 
+  Registered =
+    registered(),
+  ?DEBUG([
+    {node, node()},
+    {registered, Registered}]),
+
   MerkleEnabled =
     lists:member(
-      svc_blockchain_merkle, registered()),
+      svc_blockchain_merkle, Registered),
 
   if
     MerkleEnabled ->
@@ -72,7 +78,7 @@ handle_request(Arg, 'POST',
       ?DEBUG([
         {hash, Hash}]),
 
-      {Signed, PubKey} =
+      {ok, {Signed, PubKey}} =
         svc_blockchain_merkle:push_hash(Hash),
 
       {ok, {?mt_param_merkle, [],
@@ -89,9 +95,15 @@ handle_request(Arg, 'POST',
 handle_request(Arg, 'GET',
     "/proof" ++ Signed_, #?USER{}) ->
 
+  Registered =
+    registered(),
+  ?DEBUG([
+    {node, node()},
+    {registered, Registered}]),
+
   MerkleEnabled =
     lists:member(
-      svc_blockchain_merkle, registered()),
+      svc_blockchain_merkle, Registered),
 
   if
     MerkleEnabled ->
@@ -116,8 +128,8 @@ handle_request(Arg, 'GET',
               {?mt_param_signed, [], [{?PRIMITIVE, ?string, ?s(Signed)}]},
               {?mt_param_pubkey, [], [{?PRIMITIVE, ?string, ?s(PubKey)}]}]}};
 
-        {error, not_found} ->
-          {error, not_found}
+        {error, Reason} ->
+          {error, Reason}
       end;
 
     true ->
@@ -130,9 +142,15 @@ handle_request(Arg, 'GET',
 handle_request(Arg, 'GET',
     "/epoch" ++ Epoch_, #?USER{}) ->
 
+  Registered =
+    registered(),
+  ?DEBUG([
+    {node, node()},
+    {registered, Registered}]),
+
   MerkleEnabled =
     lists:member(
-      svc_blockchain_merkle, registered()),
+      svc_blockchain_merkle, Registered),
 
   if
     MerkleEnabled ->
@@ -159,15 +177,21 @@ handle_request(Arg, 'GET',
 handle_request(_Arg, 'GET',
     "/latest", #?USER{}) ->
 
+  Registered =
+    registered(),
+  ?DEBUG([
+    {node, node()},
+    {registered, Registered}]),
+
   MerkleEnabled =
     lists:member(
-      svc_blockchain_merkle, registered()),
+      svc_blockchain_merkle, Registered),
 
   if
     MerkleEnabled ->
 
-      {ok, #svc_blockchain_merkle_hashes{epoch = Epoch}} =
-        sse_cfg:get_resource(svc_blockchain_merkle_hashes, ?hashes_record_key),
+      {ok, #sse_blockchain_merkle_hashes{epoch = Epoch}} =
+        sse_cfg:get_resource(sse_blockchain_merkle_hashes, ?hashes_record_key),
 
       if
         is_integer(Epoch) ->
@@ -236,12 +260,12 @@ get_epoch_info(Epoch) ->
     {epoch, Epoch}]),
 
   {ok, Record} =
-    sse_cfg:get_resource(svc_blockchain_merkle_epoch, Epoch),
+    sse_cfg:get_resource(sse_blockchain_merkle_epoch, Epoch),
 
   ?DEBUG([
     {record, Record}]),
 
-  #svc_blockchain_merkle_epoch{
+  #sse_blockchain_merkle_epoch{
     hashes = Hashes_,
     epoch = Epoch,
     urls = Urls_,

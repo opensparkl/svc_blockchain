@@ -33,6 +33,7 @@
 -export([
   push_hash/1,
   get_proof/1,
+  get_proofhash/1,
   start/2,
   start_link/2]).
 
@@ -82,14 +83,23 @@ start(ChainDir, BlockKeys) ->
   PId       :: pid().
 
 start(ChainDir, BlockKeys) ->
+  ?DEBUG([
+    {ChainDir, BlockKeys}]),
+
   InstanceSpec =
     #{
       id      => svc_blockchain_merkle,
       start   => {?MODULE, start_link, [ChainDir, BlockKeys]},
       restart => temporary,
       type    => worker},
-  {ok, _Pid} =
-    supervisor:start_child(svc_blockchain_sup, InstanceSpec).
+  {ok, Pid} =
+    supervisor:start_child(svc_blockchain_sup, InstanceSpec),
+
+  ?DEBUG([
+    {node, node()},
+    {registered, registered()}]),
+
+  {ok, Pid}.
 
 %% @doc
 %% Starts singleton merkle tree processor, returning the gen_server
@@ -114,17 +124,22 @@ push_hash(Hash) ->
     svc_blockchain_merkle, {hash, Hash}).
 
 %% @doc
-%% Get proof of hash record
+%% Get proof of signature
 get_proof(Signed) ->
   gen_server:call(
     svc_blockchain_merkle, {proof, Signed}).
+
+%% @doc
+%% Get proof of original hash
+get_proofhash(Hash) ->
+  gen_server:call(
+    svc_blockchain_merkle, {proofhash, Hash}).
 
 
 %% ------------------------------------------------------------------
 %% gen_server implementation
 %% ------------------------------------------------------------------
 init({ChainDir, BlockKeys}) ->
-
   ?DEBUG([
     {chain_dir, ChainDir},
     {block_keys, BlockKeys}]),
@@ -179,7 +194,7 @@ init({ChainDir, BlockKeys}) ->
   {ok, BackupEpoch} =
     recover_dets(BackupTableRef, Node),
 
-  {ok, #?STATE{
+  State = #?STATE{
     pubkey = PubKey,
     privkey = PrivKey,
     chain_dir = ChainDir,
@@ -190,7 +205,11 @@ init({ChainDir, BlockKeys}) ->
     set_backup_timer = SetBackupTimer,
     backup_epoch = BackupEpoch,
     merkletree_fwds = MerkleTreeFwds
-  }}.
+  },
+
+  ?DEBUG([
+    {state, State}]),
+  {ok, State}.
 
 
 handle_call(
@@ -206,37 +225,35 @@ handle_call(
   Signed =
     add_pending_hash(Hash, PrivKey),
 
+  Reply =
+    {ok, {Signed, PubKey}},
+
   ?DEBUG([
     {signed, Signed}]),
-  {reply, {Signed, PubKey}, State};
+  {reply, Reply, State};
 
 handle_call(
-    {proof, Signed_},
+    {proofhash, Hash},
     _From,
     #?STATE{
       pubkey = PubKey,
       privkey = PrivKey} = State) ->
 
-  Reply =
-    try
-      ?DEBUG([
-        {get_proof, Signed_}]),
+  Signed =
+    ?s(svc_blockchain_crypto:sign(
+      ?u(Hash), PrivKey)),
 
-      {Signed, Proof, Epoch} =
-        get_proof(Signed_, PrivKey),
+  {reply, handle_get_proof(Signed, PubKey, PrivKey), State};
 
-      ?DEBUG([
-        {epoch, Epoch},
-        {signed, Signed},
-        {proof, Proof}]),
 
-      {ok, {Signed, Proof, PubKey, Epoch}}
-    catch
-      ?BADMATCH(_Term) ->
-        {error, not_found}
-    end,
+handle_call(
+    {proof, Signed},
+    _From,
+    #?STATE{
+      pubkey = PubKey,
+      privkey = PrivKey} = State) ->
 
-  {reply, Reply, State};
+  {reply, handle_get_proof(Signed, PubKey, PrivKey), State};
 
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -251,9 +268,9 @@ handle_cast(
 
   {ok, HashesRecord_} =
     sse_cfg:get_resource(
-      svc_blockchain_merkle_hashes, ?hashes_record_key),
+      sse_blockchain_merkle_hashes, ?hashes_record_key),
 
-  #svc_blockchain_merkle_hashes{
+  #sse_blockchain_merkle_hashes{
     epoch = Epoch
   } = HashesRecord_,
 
@@ -287,9 +304,9 @@ handle_cast(
 
   {ok, QuorumRecord_} =
     sse_cfg:get_resource(
-      svc_blockchain_merkle_quorum, ?quorum_record_key),
+      sse_blockchain_merkle_quorum, ?quorum_record_key),
 
-  #svc_blockchain_merkle_quorum{
+  #sse_blockchain_merkle_quorum{
     quorum = Quorum
   } = QuorumRecord_,
 
@@ -381,6 +398,44 @@ code_change(_OldVsn, State, _Extra) ->
 %% ------------------------------------------------------------------
 
 %% @doc
+%% Common get proof of hash logic.
+%%
+handle_get_proof(Signed_, PubKey, PrivKey) ->
+  try
+    ?DEBUG([
+      {get_proof, Signed_}]),
+
+    {Signed, Proof, Epoch} =
+      get_proof(Signed_, PrivKey),
+
+    ?DEBUG([
+      {epoch, Epoch},
+      {signed, Signed},
+      {proof, Proof}]),
+
+    {ok, {Signed, Proof, PubKey, Epoch}}
+  catch
+    ?BADMATCH(_Term) ->
+      % Check to see if it is in the pending queue.
+      {ok, HashesRecord_} =
+        sse_cfg:get_resource(
+          sse_blockchain_merkle_hashes, ?hashes_record_key),
+
+      #sse_blockchain_merkle_hashes{
+        hashes = Hashes
+      } = HashesRecord_,
+
+      case proplists:get_value(Signed_, Hashes) of
+        undefined ->
+          {error, not_found};
+
+        _Hash ->
+          {error, pending}
+      end
+  end.
+
+
+%% @doc
 %% Goes through the keys of the back-up dets table, which are hashes
 %% to get associated proofs.  Constructs a proof record which is pushed to
 %% mnesia if not already there.   Also updates a quorum record 'latest'
@@ -422,15 +477,15 @@ when
   NextEpoch    :: integer().
 
 recover_dets_(
-    TableRef, {svc_blockchain_merkle_proof, HashKey}, NextEpoch) ->
+    TableRef, {sse_blockchain_merkle_proof, HashKey}, NextEpoch) ->
 
-  [{{svc_blockchain_merkle_proof, HashKey},
-      #svc_blockchain_merkle_proof{} = ProofRecord}] =
-    dets:lookup(TableRef, {svc_blockchain_merkle_proof, HashKey}),
+  [{{sse_blockchain_merkle_proof, HashKey},
+      #sse_blockchain_merkle_proof{} = ProofRecord}] =
+    dets:lookup(TableRef, {sse_blockchain_merkle_proof, HashKey}),
 
   AddProofRecord =
     fun(Record) ->
-      #svc_blockchain_merkle_proof{
+      #sse_blockchain_merkle_proof{
         epoch = Epoch_
       } = Record,
 
@@ -444,9 +499,13 @@ recover_dets_(
     end,
 
   update_resource(
-    AddProofRecord, #svc_blockchain_merkle_proof{}, HashKey),
+    AddProofRecord, #sse_blockchain_merkle_proof{}, HashKey),
 
-  case dets:next(TableRef, {svc_blockchain_merkle_proof, HashKey}) of
+  Next =
+    dets:next(TableRef, {sse_blockchain_merkle_proof, HashKey}),
+  ?DEBUG([{debug, Next}]),
+
+  case dets:next(TableRef, {sse_blockchain_merkle_proof, HashKey}) of
     '$end_of_table' ->
       NextEpoch;
 
@@ -455,15 +514,15 @@ recover_dets_(
   end;
 
 recover_dets_(
-    TableRef, {svc_blockchain_merkle_epoch, Epoch}, NextEpoch_) ->
+    TableRef, {sse_blockchain_merkle_epoch, Epoch}, NextEpoch_) ->
 
-  [{{svc_blockchain_merkle_epoch, Epoch},
-      #svc_blockchain_merkle_epoch{} = EpochRecord}] =
-    dets:lookup(TableRef, {svc_blockchain_merkle_epoch, Epoch}),
+  [{{sse_blockchain_merkle_epoch, Epoch},
+      #sse_blockchain_merkle_epoch{} = EpochRecord}] =
+    dets:lookup(TableRef, {sse_blockchain_merkle_epoch, Epoch}),
 
   AddEpochRecord =
     fun(Record) ->
-      #svc_blockchain_merkle_epoch{
+      #sse_blockchain_merkle_epoch{
         epoch = Epoch_
       } = Record,
 
@@ -477,7 +536,7 @@ recover_dets_(
     end,
 
   update_resource(
-    AddEpochRecord, #svc_blockchain_merkle_epoch{}, Epoch),
+    AddEpochRecord, #sse_blockchain_merkle_epoch{}, Epoch),
 
   Epoch1 =
     Epoch + 1,
@@ -493,7 +552,7 @@ recover_dets_(
 
 
   case dets:next(
-      TableRef, {svc_blockchain_merkle_epoch, Epoch}) of
+      TableRef, {sse_blockchain_merkle_epoch, Epoch}) of
     '$end_of_table' ->
       NextEpoch;
 
@@ -518,16 +577,16 @@ assert_quorum_record(Node, NextEpoch) ->
   % what it considers the next epoch to be.
   AssertQuorumRecord =
     fun(Record) ->
-      #svc_blockchain_merkle_quorum{
+      #sse_blockchain_merkle_quorum{
         quorum = Quorum} = Record,
 
-      Record#svc_blockchain_merkle_quorum{
+      Record#sse_blockchain_merkle_quorum{
         quorum = [{Node, NextEpoch} | Quorum]
       }
     end,
 
   update_resource(
-    AssertQuorumRecord, #svc_blockchain_merkle_quorum{}, ?quorum_record_key).
+    AssertQuorumRecord, #sse_blockchain_merkle_quorum{}, ?quorum_record_key).
 
 
 %% @doc
@@ -542,19 +601,19 @@ when
 update_dets(BackupTableRef, BackupEpoch_) ->
   GetEpochRecord =
     fun() ->
-      sse_cfg:get_resource(svc_blockchain_merkle_epoch, BackupEpoch_)
+      sse_cfg:get_resource(sse_blockchain_merkle_epoch, BackupEpoch_)
     end,
 
   BackupEpoch =
     case
       lock_trans(
-        svc_blockchain_merkle_epoch, self(), GetEpochRecord)
+        sse_blockchain_merkle_epoch, self(), GetEpochRecord)
     of
       {error, not_found} ->
         BackupEpoch_;
 
       {ok, EpochRecord} ->
-        #svc_blockchain_merkle_epoch{
+        #sse_blockchain_merkle_epoch{
           hashes = Hashes
         } = EpochRecord,
 
@@ -564,20 +623,20 @@ update_dets(BackupTableRef, BackupEpoch_) ->
         % Update DETS
         DetsEntry = dets:lookup(
           BackupTableRef,
-          {svc_blockchain_merkle_epoch, BackupEpoch_}),
+          {sse_blockchain_merkle_epoch, BackupEpoch_}),
 
         if
           DetsEntry == [] ->
             ok =
               dets:insert(
                 BackupTableRef,
-                {{svc_blockchain_merkle_epoch, BackupEpoch_},
+                {{sse_blockchain_merkle_epoch, BackupEpoch_},
                   EpochRecord}),
 
             lists:foreach(
               fun(Hash_) ->
                 {ok, ProofRecord} =
-                  sse_cfg:get_resource(svc_blockchain_merkle_proof, Hash_),
+                  sse_cfg:get_resource(sse_blockchain_merkle_proof, Hash_),
 
                 ?DEBUG([
                   {proofrecord, ProofRecord}]),
@@ -585,7 +644,7 @@ update_dets(BackupTableRef, BackupEpoch_) ->
                 ok =
                   dets:insert(
                     BackupTableRef,
-                    {{svc_blockchain_merkle_proof, Hash_},
+                    {{sse_blockchain_merkle_proof, Hash_},
                       ProofRecord})
               end,
               Hashes),
@@ -681,10 +740,10 @@ when
   Proof   :: list(merkle_tree_node()),
   Epoch   :: integer().
 
-get_proof(Hash, PrivKey) ->
-  {ok, #svc_blockchain_merkle_proof{
+get_proof(Signed_, PrivKey) ->
+  {ok, #sse_blockchain_merkle_proof{
     proof = Proof_,
-    epoch = Epoch}} = sse_cfg:get_resource(svc_blockchain_merkle_proof, Hash),
+    epoch = Epoch}} = sse_cfg:get_resource(sse_blockchain_merkle_proof, Signed_),
 
   ?DEBUG([
     {proof_, Proof_},
@@ -764,10 +823,10 @@ create_init_records() ->
 create_init_records() ->
   ok =
     create_init_record(
-      #svc_blockchain_merkle_hashes{}, ?hashes_record_key),
+      #sse_blockchain_merkle_hashes{}, ?hashes_record_key),
   ok =
     create_init_record(
-      #svc_blockchain_merkle_quorum{}, ?quorum_record_key).
+      #sse_blockchain_merkle_quorum{}, ?quorum_record_key).
 
 
 %% @doc
@@ -775,7 +834,7 @@ create_init_records() ->
 %%
 -spec
 update_hashes_epoch(Epoch) ->
-  {ok, #svc_blockchain_merkle_hashes{}}
+  {ok, #sse_blockchain_merkle_hashes{}}
 when
   Epoch :: integer().
 
@@ -783,7 +842,7 @@ update_hashes_epoch(Epoch) ->
   UpdateRecord =
     fun(HashesRecord_) ->
       HashesRecord =
-        HashesRecord_#svc_blockchain_merkle_hashes{
+        HashesRecord_#sse_blockchain_merkle_hashes{
           epoch = Epoch
         },
       ?DEBUG([
@@ -792,7 +851,7 @@ update_hashes_epoch(Epoch) ->
     end,
 
   update_resource(
-    UpdateRecord, #svc_blockchain_merkle_hashes{}, ?hashes_record_key).
+    UpdateRecord, #sse_blockchain_merkle_hashes{}, ?hashes_record_key).
 
 
 %% @doc
@@ -813,17 +872,17 @@ add_pending_hash(Hash, PrivKey) ->
 
   UpdateRecord =
     fun(Record) ->
-      #svc_blockchain_merkle_hashes{
+      #sse_blockchain_merkle_hashes{
           hashes = Hashes
       } = Record,
 
-      Record#svc_blockchain_merkle_hashes{
+      Record#sse_blockchain_merkle_hashes{
         hashes = [{Signed, Hash} | Hashes]
       }
     end,
 
   update_resource(
-    UpdateRecord, #svc_blockchain_merkle_hashes{}, ?hashes_record_key),
+    UpdateRecord, #sse_blockchain_merkle_hashes{}, ?hashes_record_key),
 
   Signed.
 
@@ -842,9 +901,9 @@ when
 
 process_merkle_tree(MerkleTreeFwds, Backup, PubKey) ->
   {ok, HashRecord} =
-    sse_cfg:get_resource(svc_blockchain_merkle_hashes, ?hashes_record_key),
+    sse_cfg:get_resource(sse_blockchain_merkle_hashes, ?hashes_record_key),
 
-  #svc_blockchain_merkle_hashes{
+  #sse_blockchain_merkle_hashes{
     hashes = Hashes,
     epoch = Epoch
   } = HashRecord,
@@ -861,7 +920,7 @@ process_merkle_tree(MerkleTreeFwds, Backup, PubKey) ->
 
   RecordMerkleProofs =
     fun(Record_) ->
-      #svc_blockchain_merkle_hashes{
+      #sse_blockchain_merkle_hashes{
         hashes = Hashes_,
         epoch = Epoch_
       } = Record_,
@@ -879,7 +938,7 @@ process_merkle_tree(MerkleTreeFwds, Backup, PubKey) ->
             {remhashes, Hashes__}]),
 
           Epoch__ = Epoch_ + 1,
-          Record = Record_#svc_blockchain_merkle_hashes{
+          Record = Record_#sse_blockchain_merkle_hashes{
             hashes = Hashes__,
             epoch = Epoch__
           },
@@ -899,7 +958,7 @@ process_merkle_tree(MerkleTreeFwds, Backup, PubKey) ->
 
           AssertEpochRecord =
             fun(Record__) ->
-              Record__#svc_blockchain_merkle_epoch{
+              Record__#sse_blockchain_merkle_epoch{
                 epoch = Epoch,
                 hashes = Hashes,
                 pubkey = PubKey,
@@ -909,12 +968,12 @@ process_merkle_tree(MerkleTreeFwds, Backup, PubKey) ->
 
           {ok, EpochRecord} =
             update_resource(
-              AssertEpochRecord, #svc_blockchain_merkle_epoch{}, Epoch),
+              AssertEpochRecord, #sse_blockchain_merkle_epoch{}, Epoch),
 
           ok =
             dets:insert(
               Backup,
-              {{svc_blockchain_merkle_epoch, Epoch}, EpochRecord}),
+              {{sse_blockchain_merkle_epoch, Epoch}, EpochRecord}),
 
           % Store merkle proofs.
           ok =
@@ -931,7 +990,7 @@ process_merkle_tree(MerkleTreeFwds, Backup, PubKey) ->
     end,
 
   update_resource(
-    RecordMerkleProofs, #svc_blockchain_merkle_hashes{}, ?hashes_record_key).
+    RecordMerkleProofs, #sse_blockchain_merkle_hashes{}, ?hashes_record_key).
 
 
 %% @doc
@@ -1132,7 +1191,7 @@ store_merkle_proofs(
 
   AddProofRecord =
     fun(Record) ->
-      Record#svc_blockchain_merkle_proof{
+      Record#sse_blockchain_merkle_proof{
         proof = Proof,
         epoch = Epoch
       }
@@ -1140,10 +1199,10 @@ store_merkle_proofs(
 
   {ok, ProofRecord} =
     update_resource(
-      AddProofRecord, #svc_blockchain_merkle_proof{}, Hash),
+      AddProofRecord, #sse_blockchain_merkle_proof{}, Hash),
   ok =
     dets:insert(
-      Backup, {{svc_blockchain_merkle_proof, Hash}, ProofRecord}),
+      Backup, {{sse_blockchain_merkle_proof, Hash}, ProofRecord}),
   ok =
     store_merkle_proofs(Proofs, Backup, Epoch).
 
@@ -1162,8 +1221,8 @@ when
 post_tree_details(MerkleTreeFwds, Backup, Epoch) ->
   spawn(
     fun() ->
-      {ok, #svc_blockchain_merkle_epoch{root = RootHash}} =
-        sse_cfg:get_resource(svc_blockchain_merkle_epoch, Epoch),
+      {ok, #sse_blockchain_merkle_epoch{root = RootHash}} =
+        sse_cfg:get_resource(sse_blockchain_merkle_epoch, Epoch),
 
       Timestamp =
         sse_util:timestamp_6dp_str(),
@@ -1225,7 +1284,7 @@ post_tree_details(MerkleTreeFwds, Backup, Epoch) ->
       % We also need to assert records for each epoch
       AssertEpochRecord =
         fun(Record) ->
-          Record#svc_blockchain_merkle_epoch{
+          Record#sse_blockchain_merkle_epoch{
             timestamp = Timestamp,
             urls = Urls
           }
@@ -1233,11 +1292,11 @@ post_tree_details(MerkleTreeFwds, Backup, Epoch) ->
 
       {ok, EpochRecord} =
         update_resource(
-          AssertEpochRecord, #svc_blockchain_merkle_epoch{}, Epoch),
+          AssertEpochRecord, #sse_blockchain_merkle_epoch{}, Epoch),
 
       ok =
         dets:insert(
-          Backup, {{svc_blockchain_merkle_epoch, Epoch},
+          Backup, {{sse_blockchain_merkle_epoch, Epoch},
             EpochRecord})
     end),
   ok.

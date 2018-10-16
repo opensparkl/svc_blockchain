@@ -128,17 +128,17 @@
 -type(tree_epoch()   :: integer()).
 -type(tree_proof()   :: list(sha256_double_hash())).
 
--record(svc_blockchain_merkle_proof, {
+-record(sse_blockchain_merkle_proof, {
   proof = []         :: tree_proof(),
   epoch = undefined  :: tree_epoch() | undefined
 }).
 
--record(svc_blockchain_merkle_hashes, {
+-record(sse_blockchain_merkle_hashes, {
   hashes = []        :: list({sha256_double_hash(), sha256_double_hash()}),
   epoch = undefined  :: tree_epoch() | undefined
 }).
 
--record(svc_blockchain_merkle_epoch, {
+-record(sse_blockchain_merkle_epoch, {
   hashes = []        :: list({sha256_double_hash(), sha256_double_hash()}),
   epoch = undefined  :: tree_epoch() | undefined,
   pubkey = <<>>      :: ed25519_pubkey(),
@@ -147,6 +147,6 @@
   timestamp          :: string() | undefined
 }).
 
--record(svc_blockchain_merkle_quorum, {
+-record(sse_blockchain_merkle_quorum, {
   quorum = []        :: list({string(), integer()})
 }).

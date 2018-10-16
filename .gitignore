@@ -1,0 +1,85 @@
+# No .files except .gitignore #
+###############################
+.dialyzer_plt
+.build
+
+# SSE generated files #
+#######################
+license.txt
+stamps.txt
+distro
+ct_logs
+mnesia
+distro
+/nodes
+doc/
+
+# Dependencies except rebar runnables and makefiles #
+#####################################################
+deps/*
+!deps/Makefile
+!deps/*.mk
+!deps/rebar?
+
+# Compiled source #
+###################
+*.o
+*.beam
+*.plt
+ebin
+.metadata
+*.dump
+.rebar
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Packages #
+############
+# it's better to unpack these files and commit the raw source
+# git has its own built in compression methods
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Logs and databases #
+######################
+*.log
+*.sql
+*.sqlite
+
+# OS generated files #
+######################
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea
+
+# pyc files #
+#############
+**/*.pyc
+**/__pycache__/
+
+#intellij#
+##########
+*.iml
+
+# R #
+.Rhistory
+
+# Ansible #
+###########
+**/Darwin/*.retry
+**/Linux/*.retry
